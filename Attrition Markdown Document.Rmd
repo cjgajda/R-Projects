@@ -1,0 +1,247 @@
+---
+title: "IBM Attrition Analysis and Predictive Modeling"
+author: "Clifford Gajda"
+date: "2023-04-24"
+output: html_document
+---
+
+## Exploratory Data Analysis ##
+
+##### Load data and necessary libraries #####
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(skimr)
+library(tidyverse)
+library(caret)
+library(xgboost)
+library(pROC)
+
+attrition_df <- read_csv("~/Portfolio Projects/IBM Attrition Analysis/IBM_Attrition_Data.csv")
+```
+
+
+##### Check for missing values and get summary statistics from the data frame #####
+
+*Note: Overall, this is a very clean data set with no missing values and no      unusual outliers so we do not need to do much cleaning.*
+```{r warning=FALSE, message=FALSE}
+skim(attrition_df)
+```
+
+
+##### For interpretation, I've cleaned some of the classification variables by replacing the numerical value with the actual description. #####
+```{r warning=FALSE, message=FALSE}
+#Replace Education
+attrition_df$Education <- as.character(as.numeric(attrition_df$Education))
+attrition_df['Education'][attrition_df['Education'] == 1] <- 'Below College'
+attrition_df['Education'][attrition_df['Education'] == 2] <- 'College'
+attrition_df['Education'][attrition_df['Education'] == 3] <- 'Bachelor'
+attrition_df['Education'][attrition_df['Education'] == 4] <- 'Master'
+attrition_df['Education'][attrition_df['Education'] == 5] <- 'Doctor' 
+
+#Replace Environment Satisfaction
+attrition_df$EnvironmentSatisfaction <- as.character(as.numeric(attrition_df$EnvironmentSatisfaction))
+attrition_df['EnvironmentSatisfaction'][attrition_df['EnvironmentSatisfaction'] == 1] <- 'Low'
+attrition_df['EnvironmentSatisfaction'][attrition_df['EnvironmentSatisfaction'] == 2] <- 'Medium'
+attrition_df['EnvironmentSatisfaction'][attrition_df['EnvironmentSatisfaction'] == 3] <- 'High'
+attrition_df['EnvironmentSatisfaction'][attrition_df['EnvironmentSatisfaction'] == 4] <- 'Very High'
+
+#Replace Job Involvement
+attrition_df$JobSatisfaction <- as.character(as.numeric(attrition_df$JobSatisfaction))
+attrition_df['JobSatisfaction'][attrition_df['JobSatisfaction'] == 1] <- 'Low'
+attrition_df['JobSatisfaction'][attrition_df['JobSatisfaction'] == 2] <- 'Medium'
+attrition_df['JobSatisfaction'][attrition_df['JobSatisfaction'] == 3] <- 'High'
+attrition_df['JobSatisfaction'][attrition_df['JobSatisfaction'] == 4] <- 'Very High'
+
+#Replace Job Satisfaction
+attrition_df$JobInvolvement <- as.character(as.numeric(attrition_df$JobInvolvement))
+attrition_df['JobInvolvement'][attrition_df['JobInvolvement'] == 1] <- 'Low'
+attrition_df['JobInvolvement'][attrition_df['JobInvolvement'] == 2] <- 'Medium'
+attrition_df['JobInvolvement'][attrition_df['JobInvolvement'] == 3] <- 'High'
+attrition_df['JobInvolvement'][attrition_df['JobInvolvement'] == 4] <- 'Very High'
+
+#Replace Performance Rating
+attrition_df$PerformanceRating <- as.character(as.numeric(attrition_df$PerformanceRating))
+attrition_df['PerformanceRating'][attrition_df['PerformanceRating'] == 1] <- 'Low'
+attrition_df['PerformanceRating'][attrition_df['PerformanceRating'] == 2] <- 'Good'
+attrition_df['PerformanceRating'][attrition_df['PerformanceRating'] == 3] <- 'Excellent'
+attrition_df['PerformanceRating'][attrition_df['PerformanceRating'] == 4] <- 'Outstanding' 
+
+#Replace Relationship Satisfaction
+attrition_df$RelationshipSatisfaction <- as.character(as.numeric(attrition_df$RelationshipSatisfaction))
+attrition_df['RelationshipSatisfaction'][attrition_df['RelationshipSatisfaction'] == 1] <- 'Low'
+attrition_df['RelationshipSatisfaction'][attrition_df['RelationshipSatisfaction'] == 2] <- 'Medium'
+attrition_df['RelationshipSatisfaction'][attrition_df['RelationshipSatisfaction'] == 3] <- 'High'
+attrition_df['RelationshipSatisfaction'][attrition_df['RelationshipSatisfaction'] == 4] <- 'Very High'
+
+#Replace Work Life Balance
+attrition_df$WorkLifeBalance <- as.character(as.numeric(attrition_df$WorkLifeBalance))
+attrition_df['WorkLifeBalance'][attrition_df['WorkLifeBalance'] == 1] <- 'Bad'
+attrition_df['WorkLifeBalance'][attrition_df['WorkLifeBalance'] == 2] <- 'Good'
+attrition_df['WorkLifeBalance'][attrition_df['WorkLifeBalance'] == 3] <- 'Better'
+attrition_df['WorkLifeBalance'][attrition_df['WorkLifeBalance'] == 4] <- 'Best'
+
+```
+
+
+##### Box plots were created for all numerical variables against attrition, but the 3 shown below seem to be the most informative. #####
+```{r warning=FALSE, message=FALSE}
+boxplot(attrition_df$DailyRate ~attrition_df$Attrition, ylab="Daily Rate", xlab="Attrition", main="Daily Rate by Attrition")
+
+boxplot(attrition_df$Age ~attrition_df$Attrition, ylab="Age", xlab="Attrition", main="Age by Attrition")
+
+boxplot(attrition_df$DistanceFromHome ~attrition_df$Attrition, ylab="Distance From Home", xlab="Attrition", main="Distance From Home by Attrition")
+```
+
+
+##### The bar charts below were created to look at turnover rates in comparison to some of the categorical variables in the data set #####
+```{r warning=FALSE, message=FALSE}
+#Bar Charts
+#Attrition Counts by Education
+education_attrition <- attrition_df %>% 
+  filter(Attrition=='Yes') %>% 
+  group_by(Education) %>% 
+  summarize(Attrition_Count = sum(EmployeeCount))
+
+#Total EE by Education
+education_total_EE <- attrition_df %>% 
+  group_by(Education) %>% 
+  summarize(EE_Count = sum(EmployeeCount))
+
+#Combine and calculate attrition rate to be used for bar chart
+Attrition_Rates <- inner_join(education_attrition, education_total_EE)
+Attrition_Rates$attrition_percentage <- round(((Attrition_Rates$Attrition_Count/Attrition_Rates$EE_Count)*100),digits = 2)
+  
+#Plot showing attrition rates by education level
+ggplot(Attrition_Rates, aes(x=reorder(Education,-attrition_percentage), y = attrition_percentage)) +
+  geom_bar(stat="identity", fill='tan', color='black') +
+  ylab("Attrition %") +
+  xlab("Education Level") +
+  ggtitle("Attrition by Education (%)") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label = signif(attrition_percentage)), nudge_y = 1)
+
+
+#Attrition Counts by Department
+department_attrition <- attrition_df %>% 
+  filter(Attrition=='Yes') %>%
+  group_by(Department) %>% 
+  summarize(Attrition_Count = sum(EmployeeCount))
+
+#Total EE by Department
+department_total_EE <- attrition_df %>% 
+  group_by(Department) %>% 
+  summarize(EE_Count = sum(EmployeeCount))
+
+#Combine and calculate attrition rate to be used for bar chart
+Attrition_Rates_Dept <- inner_join(department_attrition, department_total_EE)
+Attrition_Rates_Dept$attrition_percentage <- round(((Attrition_Rates_Dept$Attrition_Count/Attrition_Rates_Dept$EE_Count)*100),digits = 2)
+
+#Plot showing attrition rates by education level
+ggplot(Attrition_Rates_Dept, aes(x=reorder(Department,-attrition_percentage), y = attrition_percentage)) +
+  geom_bar(stat="identity", fill='purple', color='black') +
+  ylab("Attrition %") +
+  xlab("Department") +
+  ggtitle("Attrition by Department (%)") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label = signif(attrition_percentage)), nudge_y = 1) 
+```
+
+
+
+## Model Training and Testing ##
+
+
+#### Data Preparation for Training ####
+
+*Remove unimportant or redundant variables*
+*Convert categorical variables to dummy variables*
+*Convert the attrition variable to a factor*
+
+```{r warning=FALSE, message=FALSE}
+# Convert "Attrition" to a factor
+attrition_df$Attrition <- as.factor(attrition_df$Attrition)
+
+# Remove unnecessary columns
+# Keep HourlyRate for the compensation piece
+attrition_df <- select(attrition_df, -c(StandardHours, Over18, EmployeeNumber, EmployeeCount, DailyRate, MonthlyRate, HourlyRate)) 
+
+# Create dummy variables for specified columns
+dummy_cols <- c("BusinessTravel", "Department", "Education", "EducationField", "EnvironmentSatisfaction", "Gender", "JobInvolvement", "JobRole", "JobSatisfaction", "MaritalStatus", "OverTime", "PerformanceRating", "RelationshipSatisfaction", "WorkLifeBalance")
+
+attrition_df_dummies <- model.matrix(~.+0, data = attrition_df[dummy_cols])
+
+# Add dummy variables to original data frame and remove original columns
+attrition_df <- bind_cols(attrition_df, attrition_df_dummies) %>%
+  select(-one_of(dummy_cols))
+```
+
+
+##### Train XGBoost Model #####
+```{r warning=FALSE, message=FALSE}
+# create train and test sets
+set.seed(123)
+train_idx <- createDataPartition(attrition_df$Attrition, p = 0.8, list = FALSE)
+train_set <- attrition_df[train_idx, ]
+test_set <- attrition_df[-train_idx, ]
+
+# set up cross-validation
+train_control <- trainControl(
+  method = "cv",
+  number = 5,
+  savePredictions = "final",
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  verboseIter = FALSE,
+  sampling = "smote" 
+)   
+
+# build XGBoost model
+xgb_model <- train(
+  Attrition ~ .,
+  data = train_set,
+  method = "xgbTree",
+  metric = "F",
+  trControl = train_control,
+  tuneGrid = expand.grid(
+    nrounds = 100,
+    max_depth = 3,
+    eta = 0.5,
+    gamma = 0.5,
+    colsample_bytree = 0.2,
+    min_child_weight = 1,
+    subsample = c(0.25, 0.5, 0.75, 1))
+)
+xgb_model 
+ 
+```
+
+
+##### Make Predictions on the Test Set and get Evaluation Metrics #####
+```{r warning=FALSE, message=FALSE}
+#Predict Values using the model
+xgb_preds_values <- predict(xgb_model, newdata = test_set, type="raw")
+xgb_preds_probs <- predict(xgb_model, newdata = test_set, type="prob")
+
+#Evaluate
+confusion_matrix <- confusionMatrix(xgb_preds_values, test_set$Attrition)
+
+# Calculate evaluation metrics
+accuracy <- confusion_matrix$overall[1]
+precision <- confusion_matrix$byClass[1]
+recall <- confusion_matrix$byClass[2]
+f1_score <- confusion_matrix$byClass[4]
+roc_auc <- roc(test_set$Attrition, xgb_preds_probs[,2])$auc
+
+# Print evaluation metrics
+cat("Accuracy:", round(accuracy, 3), "\n")
+cat("Precision:", round(precision, 3), "\n")
+cat("Recall:", round(recall, 3), "\n")
+cat("F1 Score:", round(f1_score, 3), "\n")
+cat("ROC AUC:", round(roc_auc, 3), "\n")
+ 
+```
+
+
+
